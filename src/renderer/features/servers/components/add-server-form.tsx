@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '/@/renderer/api';
+import { setPendingServerHeaders } from '/@/renderer/api/server-headers';
 import {
     isLegacyAuth,
     isServerLock,
@@ -118,6 +119,7 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
     const form = useForm({
         initialValues: {
             customHeaders: [] as CustomHeaderEntry[],
+            enableAudiobooks: undefined,
             legacyAuth: isLegacyAuth(),
             name:
                 (localSettings ? localSettings.env.SERVER_NAME : window.SERVER_NAME) || 'My Server',
@@ -148,7 +150,6 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
         start: startQuickConnect,
         stop: stopQuickConnect,
     } = useJellyfinQuickConnect({
-        customHeaders: normalizeCustomHeaders(form.values.customHeaders),
         onAuthenticated: (data) => {
             const url = form.values.url;
             const serverItem: ServerListItemWithCredential = {
@@ -175,6 +176,10 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                 serverItem.preferInstantMix = form.values.preferInstantMix;
             }
 
+            if (form.values.enableAudiobooks !== undefined) {
+                serverItem.enableAudiobooks = form.values.enableAudiobooks;
+            }
+
             addServer(serverItem);
             setCurrentServer(serverItem);
             closeAllModals();
@@ -185,6 +190,13 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
     useEffect(() => {
         if (!showQuickConnect) stopQuickConnect();
     }, [showQuickConnect, stopQuickConnect]);
+
+    // Clear the temporary headers of the unsaved server when the form closes
+    useEffect(() => {
+        return () => {
+            setPendingServerHeaders();
+        };
+    }, []);
 
     const fillServerDetails = (server: DiscoveredServerItem) => {
         form.setValues({ ...server });
@@ -224,6 +236,7 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
 
         try {
             setIsLoading(true);
+            await setPendingServerHeaders(values.url, normalizedCustomHeaders);
             const data: AuthenticationResponse | undefined = await authFunction(
                 values.url,
                 {
@@ -232,7 +245,6 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                     username: values.username,
                 },
                 values.type as ServerType,
-                normalizedCustomHeaders,
             );
 
             if (!data) {
@@ -255,6 +267,10 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
 
             if (values.preferInstantMix !== undefined) {
                 serverItem.preferInstantMix = values.preferInstantMix;
+            }
+
+            if (values.enableAudiobooks !== undefined) {
+                serverItem.enableAudiobooks = values.enableAudiobooks;
             }
 
             if (values.savePassword !== undefined) {
@@ -440,24 +456,43 @@ export const AddServerForm = ({ onCancel }: AddServerFormProps) => {
                         />
                     )}
                     {form.values.type === ServerType.JELLYFIN && (
-                        <Checkbox
-                            description={t('form.addServer.input', {
-                                context: 'preferInstantMixDescription',
-                            })}
-                            label={t('form.addServer.input', {
-                                context: 'preferInstantMix',
-                            })}
-                            {...form.getInputProps('preferInstantMix', {
-                                type: 'checkbox',
-                            })}
-                        />
+                        <>
+                            <Checkbox
+                                description={t('form.addServer.input', {
+                                    context: 'preferInstantMixDescription',
+                                })}
+                                label={t('form.addServer.input', {
+                                    context: 'preferInstantMix',
+                                })}
+                                {...form.getInputProps('preferInstantMix', {
+                                    type: 'checkbox',
+                                })}
+                            />
+                            <Checkbox
+                                description={t('form.addServer.input', {
+                                    context: 'enableAudiobooksDescription',
+                                })}
+                                label={t('form.addServer.input', {
+                                    context: 'enableAudiobooks',
+                                })}
+                                {...form.getInputProps('enableAudiobooks', {
+                                    type: 'checkbox',
+                                })}
+                            />
+                        </>
                     )}
                     {showQuickConnect && (
                         <JellyfinQuickConnectButton
                             code={quickConnectCode}
                             disabled={!form.values.name || !form.values.url}
                             isLoading={isQuickConnectLoading}
-                            onStart={() => startQuickConnect(form.values.url)}
+                            onStart={async () => {
+                                await setPendingServerHeaders(
+                                    form.values.url,
+                                    normalizeCustomHeaders(form.values.customHeaders),
+                                );
+                                startQuickConnect(form.values.url);
+                            }}
                             onStop={stopQuickConnect}
                             url={form.values.url}
                         />

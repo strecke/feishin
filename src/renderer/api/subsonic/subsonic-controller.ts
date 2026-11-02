@@ -7,7 +7,6 @@ import orderBy from 'lodash/orderBy';
 import md5 from 'md5';
 import { z } from 'zod';
 
-import { mergeDesktopHeaders } from '/@/renderer/api/server-headers';
 import { contract, ssApiClient } from '/@/renderer/api/subsonic/subsonic-api';
 import { mapStructuredLyric } from '/@/renderer/api/subsonic/subsonic-structured-lyrics';
 import {
@@ -66,7 +65,6 @@ const getSubsonicImageRequest = ({
 
     return {
         cacheKey: ['subsonic', server.id, baseUrl || '', id, imageSize || ''].join(':'),
-        headers: mergeDesktopHeaders(server.customHeaders),
         url:
             `${url}/rest/getCoverArt.view` +
             `?id=${id}` +
@@ -315,7 +313,7 @@ export const SubsonicController: InternalControllerEndpoint = {
 
         return null;
     },
-    authenticate: async (url, body, customHeaders) => {
+    authenticate: async (url, body) => {
         if (body.action && body.action !== 'password') {
             throw new Error('Subsonic does not support this authentication method');
         }
@@ -352,11 +350,7 @@ export const SubsonicController: InternalControllerEndpoint = {
             };
         }
 
-        const resp = await ssApiClient({
-            customHeaders,
-            server: null,
-            url: cleanServerUrl,
-        }).authenticate({
+        const resp = await ssApiClient({ server: null, url: cleanServerUrl }).authenticate({
             query: {
                 c: 'Feishin',
                 f: 'json',
@@ -1999,21 +1993,33 @@ export const SubsonicController: InternalControllerEndpoint = {
             const directPlayProfiles = getDirectPlayProfiles();
             const transcodingProfiles = getDefaultTranscodingProfiles();
 
-            const transcodeDecision = await ssApiClient(apiClientProps).getTranscodeDecision({
-                body: {
-                    codecProfiles: [],
-                    directPlayProfiles,
-                    maxAudioBitrate: 0,
-                    maxTranscodingAudioBitrate,
-                    name: 'Feishin',
-                    platform: navigator.userAgent,
-                    transcodingProfiles,
-                },
-                query: {
-                    mediaId: id,
-                    mediaType,
-                },
-            });
+            const transcodeDecision = await ssApiClient(apiClientProps)
+                .getTranscodeDecision({
+                    body: {
+                        codecProfiles: [],
+                        directPlayProfiles,
+                        maxAudioBitrate: 0,
+                        maxTranscodingAudioBitrate,
+                        name: 'Feishin',
+                        platform: navigator.userAgent,
+                        transcodingProfiles,
+                    },
+                    query: {
+                        mediaId: id,
+                        mediaType,
+                    },
+                })
+                .catch((error: unknown) => {
+                    logger.warn(
+                        `Failed to request a transcode decision for song ${id}, falling back to direct stream`,
+                        { error },
+                    );
+                    return null;
+                });
+
+            if (!transcodeDecision) {
+                return streamUrl;
+            }
 
             // If the server returns an error for transcodeDecision, fall back to direct stream so that we don't break the player
             if (transcodeDecision.status !== 200) {

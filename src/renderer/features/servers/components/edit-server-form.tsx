@@ -1,14 +1,15 @@
 import { closeAllModals } from '@mantine/modals';
 import isElectron from 'is-electron';
 import { nanoid } from 'nanoid/non-secure';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import i18n from '/@/i18n/i18n';
 import { api } from '/@/renderer/api';
+import { setPendingServerHeaders } from '/@/renderer/api/server-headers';
 import { CustomHeadersInput } from '/@/renderer/features/servers/components/custom-headers-input';
 import { queryClient } from '/@/renderer/lib/react-query';
-import { getServerById, useAuthStore, useAuthStoreActions } from '/@/renderer/store';
+import { getServerById, useAuthStoreActions } from '/@/renderer/store';
 import { Checkbox } from '/@/shared/components/checkbox/checkbox';
 import { Group } from '/@/shared/components/group/group';
 import { Icon } from '/@/shared/components/icon/icon';
@@ -58,6 +59,7 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                 key,
                 value,
             })),
+            enableAudiobooks: server.enableAudiobooks,
             isAdmin: server?.isAdmin,
             legacyAuth: false,
             name: server?.name,
@@ -71,6 +73,13 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
             username: server?.username,
         },
     });
+
+    // Clear the temporary headers used for re-authentication when the form closes
+    useEffect(() => {
+        return () => {
+            setPendingServerHeaders();
+        };
+    }, []);
 
     const isSubsonic = form.values.type === ServerType.SUBSONIC;
     const isNavidrome = form.values.type === ServerType.NAVIDROME;
@@ -136,6 +145,7 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                     });
                 }
 
+                await setPendingServerHeaders(values.url, normalizedCustomHeaders);
                 data = await authFunction(
                     values.url,
                     {
@@ -144,7 +154,6 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                         username: values.username,
                     },
                     values.type,
-                    normalizedCustomHeaders,
                 );
 
                 if (!data) {
@@ -175,6 +184,10 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                 serverItem.preferInstantMix = values.preferInstantMix;
             }
 
+            if (values.enableAudiobooks !== undefined) {
+                serverItem.enableAudiobooks = values.enableAudiobooks;
+            }
+
             if (values.savePassword !== undefined) {
                 serverItem.savePassword = values.savePassword;
             }
@@ -191,10 +204,9 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
 
             updateServer(server.id, serverItem);
 
-            // After re-authenticating or updating, switch to the updated server if
-            // there is no current server or if this is the active server.
-            const currentServer = useAuthStore.getState().currentServer;
-            if (!canSkipAuth || !currentServer || currentServer.id === server.id) {
+            // After re-authenticating, switch to the updated server so the user
+            // isn't left on the credentials / server-required screen.
+            if (!canSkipAuth) {
                 const updated = getServerById(server.id);
                 if (updated) {
                     setCurrentServer(updated);
@@ -328,17 +340,30 @@ export const EditServerForm = ({ isUpdate, onCancel, password, server }: EditSer
                     />
                 )}
                 {form.values.type === ServerType.JELLYFIN && (
-                    <Checkbox
-                        description={t('form.addServer.input', {
-                            context: 'preferInstantMixDescription',
-                        })}
-                        label={t('form.addServer.input', {
-                            context: 'preferInstantMix',
-                        })}
-                        {...form.getInputProps('preferInstantMix', {
-                            type: 'checkbox',
-                        })}
-                    />
+                    <>
+                        <Checkbox
+                            description={t('form.addServer.input', {
+                                context: 'preferInstantMixDescription',
+                            })}
+                            label={t('form.addServer.input', {
+                                context: 'preferInstantMix',
+                            })}
+                            {...form.getInputProps('preferInstantMix', {
+                                type: 'checkbox',
+                            })}
+                        />
+                        <Checkbox
+                            description={t('form.addServer.input', {
+                                context: 'enableAudiobooksDescription',
+                            })}
+                            label={t('form.addServer.input', {
+                                context: 'enableAudiobooks',
+                            })}
+                            {...form.getInputProps('enableAudiobooks', {
+                                type: 'checkbox',
+                            })}
+                        />
+                    </>
                 )}
                 <Group justify="flex-end">
                     <ModalButton onClick={onCancel}>{t('common.cancel')}</ModalButton>
